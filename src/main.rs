@@ -1006,8 +1006,10 @@ fn starting_namespace(
     )
 }
 
-/// Feed keys to the app and redraw. Returns whether anything was dispatched,
-/// so a repair that swallowed its input costs no frame.
+/// Feed keys to the app. Returns whether anything was dispatched, so the
+/// caller can mark the frame dirty. The redraw is left to the frame tick:
+/// drawing after every key let a fast wheel burst queue up faster than it was
+/// drawn, and the backlog delayed the next change of direction.
 fn dispatch(
     terminal: &mut ratatui::DefaultTerminal,
     app: &mut App,
@@ -1021,7 +1023,6 @@ fn dispatch(
         app.handle_key(key)?;
         take_suspend(terminal, app, captured);
     }
-    ui::present(terminal, app)?;
     Ok(true)
 }
 
@@ -1055,8 +1056,8 @@ async fn run(
     activity_frame.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     // Watch messages mark the frame dirty and the redraw waits for this
     // interval, so a rollout storm costs at most ~60 renders a second instead
-    // of one per message. Key events still redraw immediately for input
-    // latency.
+    // of one per message. Keys and mouse events go through the same tick, so
+    // a wheel burst drains at input speed instead of render speed.
     let mut frame = tokio::time::interval(Duration::from_millis(16));
     frame.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut dirty = false;
@@ -1088,9 +1089,7 @@ async fn run(
             }
             // No more alternate-scroll sequences either way: release any Esc
             // still waiting for a tail that can no longer come.
-            if dispatch(terminal, app, repair.flush(), captured)? {
-                dirty = false;
-            }
+            dirty |= dispatch(terminal, app, repair.flush(), captured)?;
         }
 
         tokio::select! {
@@ -1107,9 +1106,7 @@ async fn run(
                         } else {
                             repair.push(key)
                         };
-                        if dispatch(terminal, app, keys, captured)? {
-                            dirty = false;
-                        }
+                        dirty |= dispatch(terminal, app, keys, captured)?;
                     }
                     Some(Ok(Event::Mouse(m))) if captured => {
                         app.handle_mouse(m)?;
@@ -1158,9 +1155,7 @@ async fn run(
             // A held Esc was a real keypress after all, not the head of a
             // split escape sequence: act on it.
             _ = tokio::time::sleep(altscroll::Repair::TIMEOUT), if repair.pending() => {
-                if dispatch(terminal, app, repair.flush(), captured)? {
-                    dirty = false;
-                }
+                dirty |= dispatch(terminal, app, repair.flush(), captured)?;
             }
         }
     }
