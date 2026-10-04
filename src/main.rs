@@ -1006,10 +1006,10 @@ fn starting_namespace(
     )
 }
 
-/// Feed keys to the app. Returns whether anything was dispatched, so the
-/// caller can mark the frame dirty. The redraw is left to the frame tick:
-/// drawing after every key let a fast wheel burst queue up faster than it was
-/// drawn, and the backlog delayed the next change of direction.
+/// Feed keys to the app and redraw, unless more input is already waiting.
+/// Drawing after every key let a fast wheel burst queue up faster than it was
+/// drawn, and the backlog delayed the next change of direction. Returns
+/// whether a redraw is still owed, which the frame tick then takes care of.
 fn dispatch(
     terminal: &mut ratatui::DefaultTerminal,
     app: &mut App,
@@ -1029,7 +1029,13 @@ fn dispatch(
             ui::present(terminal, app)?;
         }
     }
-    Ok(true)
+    // Polling with a zero timeout only checks crossterm's buffer and the tty;
+    // the queued input stays there for `EventStream` to deliver.
+    if crossterm::event::poll(Duration::ZERO)? {
+        return Ok(true);
+    }
+    ui::present(terminal, app)?;
+    Ok(false)
 }
 
 /// Run whatever interactive command the app just queued, if any. Called after
@@ -1062,8 +1068,8 @@ async fn run(
     activity_frame.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     // Watch messages mark the frame dirty and the redraw waits for this
     // interval, so a rollout storm costs at most ~60 renders a second instead
-    // of one per message. Keys and mouse events go through the same tick, so
-    // a wheel burst drains at input speed instead of render speed.
+    // of one per message. Keys still redraw immediately for input latency,
+    // except while more input is waiting (see `dispatch`).
     let mut frame = tokio::time::interval(Duration::from_millis(16));
     frame.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut dirty = false;
