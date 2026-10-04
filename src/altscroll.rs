@@ -170,23 +170,14 @@ mod tests {
     fn a_burst_of_split_scrolls_never_yields_an_esc() {
         let mut r = Repair::default();
         let mut out = Vec::new();
+        // What crossterm actually emits for the tail `[B`: `B` carries SHIFT.
+        let b = KeyEvent::new(KeyCode::Char('B'), KeyModifiers::SHIFT);
         for _ in 0..50 {
-            for code in [KeyCode::Esc, KeyCode::Char('['), KeyCode::Char('B')] {
-                out.extend(codes(r.push(press(code))));
-            }
+            out.extend(codes(r.push(press(KeyCode::Esc))));
+            out.extend(codes(r.push(press(KeyCode::Char('[')))));
+            out.extend(codes(r.push(b)));
         }
         assert_eq!(out, vec![KeyCode::Down; 50]);
-        assert!(!r.pending());
-    }
-
-    #[test]
-    fn a_shifted_final_letter_still_completes_the_sequence() {
-        // What crossterm actually emits for the tail `[B`: `B` carries SHIFT.
-        let mut r = Repair::default();
-        assert!(r.push(press(KeyCode::Esc)).is_empty());
-        assert!(r.push(press(KeyCode::Char('['))).is_empty());
-        let b = KeyEvent::new(KeyCode::Char('B'), KeyModifiers::SHIFT);
-        assert_eq!(codes(r.push(b)), vec![KeyCode::Down]);
         assert!(!r.pending());
     }
 
