@@ -1019,15 +1019,20 @@ fn dispatch(
     if keys.is_empty() {
         return Ok(false);
     }
+    let mut drawn = false;
     for key in keys {
         let mode = app.mode;
         app.handle_key(key)?;
         take_suspend(terminal, app, captured);
         // A new popup or view learns its scroll limits when drawn. Draw it
         // now so the next key does not clamp against the old view's limits.
-        if app.mode != mode {
+        drawn = app.mode != mode;
+        if drawn {
             ui::present(terminal, app)?;
         }
+    }
+    if drawn {
+        return Ok(false);
     }
     // Polling with a zero timeout only checks crossterm's buffer and the tty;
     // the queued input stays there for `EventStream` to deliver.
