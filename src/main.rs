@@ -1020,8 +1020,14 @@ fn dispatch(
         return Ok(false);
     }
     for key in keys {
+        let mode = app.mode;
         app.handle_key(key)?;
         take_suspend(terminal, app, captured);
+        // A new popup or view learns its scroll limits when drawn. Draw it
+        // now so the next key does not clamp against the old view's limits.
+        if app.mode != mode {
+            ui::present(terminal, app)?;
+        }
     }
     Ok(true)
 }
