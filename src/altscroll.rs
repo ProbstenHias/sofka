@@ -85,7 +85,11 @@ impl Repair {
                 vec![esc, key]
             }
             State::Intro(esc) => {
-                if plain && let Some(code) = final_byte(key.code) {
+                // crossterm reports the final letter as an uppercase char,
+                // which carries SHIFT, so SHIFT alone still counts as plain.
+                if (key.modifiers - KeyModifiers::SHIFT).is_empty()
+                    && let Some(code) = final_byte(key.code)
+                {
                     return vec![KeyEvent::new(code, KeyModifiers::NONE)];
                 }
                 // Not a sequence after all: replay what was swallowed. The
@@ -172,6 +176,17 @@ mod tests {
             }
         }
         assert_eq!(out, vec![KeyCode::Down; 50]);
+        assert!(!r.pending());
+    }
+
+    #[test]
+    fn a_shifted_final_letter_still_completes_the_sequence() {
+        // What crossterm actually emits for the tail `[B`: `B` carries SHIFT.
+        let mut r = Repair::default();
+        assert!(r.push(press(KeyCode::Esc)).is_empty());
+        assert!(r.push(press(KeyCode::Char('['))).is_empty());
+        let b = KeyEvent::new(KeyCode::Char('B'), KeyModifiers::SHIFT);
+        assert_eq!(codes(r.push(b)), vec![KeyCode::Down]);
         assert!(!r.pending());
     }
 
