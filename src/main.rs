@@ -1008,16 +1008,18 @@ fn starting_namespace(
 
 /// Feed keys to the app and redraw, unless more input is already waiting.
 /// Drawing after every key let a fast wheel burst queue up faster than it was
-/// drawn, and the backlog delayed the next change of direction. Returns
-/// whether a redraw is still owed, which the frame tick then takes care of.
+/// drawn, and the backlog delayed the next change of direction. `dirty` is
+/// left set when the redraw is owed to the frame tick, and cleared when the
+/// frame was drawn here. No keys leaves it untouched.
 fn dispatch(
     terminal: &mut ratatui::DefaultTerminal,
     app: &mut App,
     keys: Vec<crossterm::event::KeyEvent>,
     captured: bool,
-) -> Result<bool> {
+    dirty: &mut bool,
+) -> Result<()> {
     if keys.is_empty() {
-        return Ok(false);
+        return Ok(());
     }
     let mut drawn = false;
     for key in keys {
@@ -1031,16 +1033,17 @@ fn dispatch(
             ui::present(terminal, app)?;
         }
     }
-    if drawn {
-        return Ok(false);
-    }
     // Polling with a zero timeout only checks crossterm's buffer and the tty;
     // the queued input stays there for `EventStream` to deliver.
-    if crossterm::event::poll(Duration::ZERO)? {
-        return Ok(true);
+    if !drawn && crossterm::event::poll(Duration::ZERO)? {
+        *dirty = true;
+        return Ok(());
     }
-    ui::present(terminal, app)?;
-    Ok(false)
+    if !drawn {
+        ui::present(terminal, app)?;
+    }
+    *dirty = false;
+    Ok(())
 }
 
 /// Run whatever interactive command the app just queued, if any. Called after
@@ -1106,7 +1109,7 @@ async fn run(
             }
             // No more alternate-scroll sequences either way: release any Esc
             // still waiting for a tail that can no longer come.
-            dirty |= dispatch(terminal, app, repair.flush(), captured)?;
+            dispatch(terminal, app, repair.flush(), captured, &mut dirty)?;
         }
 
         tokio::select! {
@@ -1123,7 +1126,7 @@ async fn run(
                         } else {
                             repair.push(key)
                         };
-                        dirty |= dispatch(terminal, app, keys, captured)?;
+                        dispatch(terminal, app, keys, captured, &mut dirty)?;
                     }
                     Some(Ok(Event::Mouse(m))) if captured => {
                         app.handle_mouse(m)?;
@@ -1172,7 +1175,7 @@ async fn run(
             // A held Esc was a real keypress after all, not the head of a
             // split escape sequence: act on it.
             _ = tokio::time::sleep(altscroll::Repair::TIMEOUT), if repair.pending() => {
-                dirty |= dispatch(terminal, app, repair.flush(), captured)?;
+                dispatch(terminal, app, repair.flush(), captured, &mut dirty)?;
             }
         }
     }
